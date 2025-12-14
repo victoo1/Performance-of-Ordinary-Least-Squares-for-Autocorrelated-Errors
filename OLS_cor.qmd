@@ -1,0 +1,294 @@
+---
+title: "Performance of Ordinary Least Squares for Autocorrelated Errors"
+format: pdf
+editor: visual
+fig-width: 10
+fig-height: 10
+fig-align: center
+---
+
+## I. Introduction
+
+Ordinary Least Squares (OLS) is one of the most widely used estimation methods in linear regression. A key assumption for OLS is that the error terms are independent and identically distributed with mean zero and constant variance. In many real-world applications, this assumption is violated because error terms exhibit serial correlation. This report investigates how autocorrelated errors affect the estimation and inference of a simple linear regression model.
+
+Specifically, this report focuses on understanding the behavior of OLS estimators when the error term follows a first-order autoregressive process, AR(1). In particular, this report examines how autocorrelation impact the distribution of regression coefficients and the interval estimations.
+
+## II. Model Specification
+
+Suppose now we have a simple linear model
+
+$$
+Y_i=\beta_0+\beta_1X_i+\epsilon_i
+$$
+
+The error term $\epsilon_i$ follows an AR(1) structure, that is,
+
+$$
+\epsilon_i=\rho\epsilon_{i-1}+u_i
+$$
+
+$$
+u_i\sim N(0,\sigma_u^2)
+$$
+
+$\rho$ is the correlation between $\epsilon_i$ and $\epsilon_{i-1}$. When $\rho=0$, the model reduces to the classical linear regression setting with independent errors. As $|\rho|$increases, the autocorrelation becomes stronger.
+
+## III. Simulation
+
+#### 1.Distribution of Parameters
+
+Table I shows the distribution information of $\hat{\beta_0}$ and $\hat{\beta_1}$ when $\rho$ takes values in {0,0.3,0.6,0.9}, including their bias and variance.
+
+As $\rho$ increases, both $\hat{\beta_0}$ and $\hat{\beta_1}$'s bias don't change much and are around 0. Therefore, the autocorrelation structure doesn't change the unbiasedness of the estimated coefficients.
+
+As $\rho$ increases, both $\beta_0$ and $\beta_1$ show increasing variances. But $Var(\hat{\beta_1})$ still doesn't change much compared with $Var(\hat{\beta_0})$.
+
+```{r}
+#| echo: false
+set.seed(123)
+n <- 1000
+beta0 <- 1
+beta1 <- 2
+x <- rnorm(n)
+
+
+#' Generate AR(1) error terms
+#'
+#' @param n Number of observations
+#' @param rho Autocorrelation coefficient
+#' @param sigma_u Standard deviation of the innovation term
+#' @return A numeric vector of AR(1) error terms
+generate_error <- function(n, rho, sigma_u=1) {
+  u <- rnorm(n, 0, sigma_u)
+  eps <- numeric(n)
+  eps[1] <- u[1] / sqrt(1 - rho^2)
+  for (i in 2:n) {
+    eps[i] <- rho * eps[i - 1] + u[i]
+    }
+  return (eps)
+  }
+
+#' Generate linear regression data with AR(1) errors
+#'
+#' @param x A numeric vector of predictors
+#' @param beta0 True beta0 of the linear model
+#' @param beta1 True beta1 of the linear model
+#' @param rho Autocorrelation coefficient of the error term
+#' @param sigma_u Standard deviation of the innovation
+#' @param B Number of bootstrap iterations
+#' @return A data frame containing bootstrap estimates of beta0 and beta1
+generate_data <- function(x, beta0, beta1, rho, sigma_u=1) {
+  eps <- generate_error(length(x), rho, sigma_u)
+  y <- beta0 + beta1 * x + eps
+  data.frame(x = x, y = y)
+  }
+```
+
+```{r}
+#| echo: false
+#' Bootstrap OLS coefficient estimates
+#'
+#' @param x A numeric vector of explanatory variables
+#' @param beta0 True intercept of the linear model
+#' @param beta1 True slope coefficient of the linear model
+#' @param rho Autocorrelation coefficient of the error term
+#' @param sigma_u Standard deviation of the innovation 
+#' @param B Number of bootstrap iterations
+#' @return A data frame containing bootstrap estimates of beta0 and beta1
+bootstrap_ols <- function(x, beta0, beta1, rho, sigma_u = 1, B = 1000) {
+coefs <- matrix(NA, B, 2)
+colnames(coefs) <- c("beta0", "beta1")
+for (b in 1:B) {
+dat <- generate_data(x, beta0, beta1, rho, sigma_u)
+fit <- lm(y ~ x, dat)
+coefs[b, ] <- coef(fit)
+}
+as.data.frame(coefs)
+}
+
+
+rho_values <- c(0, 0.3, 0.6, 0.9)
+boot_results <- lapply(rho_values, function(rho) {
+bootstrap_ols(x, beta0, beta1, rho)
+})
+names(boot_results) <- paste0("rho=", rho_values)
+
+```
+
+```{r}
+#| echo: false
+#' Compute bias and variance of OLS estimates
+#'
+#' @param df A data frame containing bootstrap estimates of beta0 and beta1
+#' @param b0 True value of the intercept
+#' @param b1 True value of the slope coefficient
+#' @return A data frame with bias and variance for beta0 and beta1
+summary_stats <- function(df, b0, b1) {
+  data.frame(
+    bias_beta0 = mean(df$beta0) - b0,
+    var_beta0 = var(df$beta0),
+    bias_beta1 = mean(df$beta1) - b1,
+    var_beta1 = var(df$beta1)
+  )
+  }
+
+
+stats <- do.call(rbind, lapply(boot_results, summary_stats,
+                               b0 = beta0, b1 = beta1))
+rownames(stats) <- names(boot_results)
+stats
+```
+
+```         
+            Table I   Bias and Variance of Coefficients as rho Changes
+```
+
+#### 2.Confidence and Prediction Intervals
+
+This report uses mean of X as the new data x0, and producces confidence intervals and prediction intervals for predicted value y0 under different $\rho$s. The result is shown in Table II. As $\rho$ increases, both intervals' length get increased, indicating the precision for estimation drops.
+
+```{r}
+#| echo: false
+# use mean(x) as the new data
+x0 <- mean(x)
+newdata <- data.frame(x = x0)
+rho_values <- c(0, 0.3, 0.6, 0.9)
+
+# get confidence and prediction interval for y0 as rho changes
+result_table <- do.call(rbind, lapply(rho_values, function(rho) {
+  dat <- generate_data(x, beta0, beta1, rho = rho)
+  fit <- lm(y ~ x, dat)
+  conf_int <- predict(fit, newdata, interval = "confidence")
+  pred_int <- predict(fit, newdata, interval = "prediction")
+  data.frame(
+    rho = rho,
+    x0 = x0,
+    fit = conf_int[1, "fit"],
+    conf_lwr = conf_int[1, "lwr"],
+    conf_upr = conf_int[1, "upr"],
+    pred_lwr = pred_int[1, "lwr"],
+    pred_upr = pred_int[1, "upr"]
+  )
+}))
+result_table
+```
+
+```         
+      Table II   Condicence and Prediction Intervals for y0 as rho Changes
+```
+
+#### 3.Changing Innovation Variance
+
+Now consider changing the innovation term $u_i$'s variance $\sigma_u$. $\rho$ still takes values in {0,0.3,0.6,0.9}, and $\sigma_u$ takes values in {0.5,1,2}.
+
+Figure 1 in Appendix shows the trend for bias and variance of regression coefficints when taking different $\rho$ and $\sigma_u$ values.
+
+The upper panels of Figure 1 in Appendix display the variances of $\hat{\beta}_0$ and $\hat{\beta}_1$ as $\sigma_u$ and $\rho$ change. In all cases, the variances increase monotonically with $\sigma_u$, reflecting the higher innovation variance leading to higher estimator uncertainty. In addition, higher $\rho$ also leads to higher variance for estimated coefficients. And $Var(\hat{\beta_1})$ still doesn't change much compared with $Var(\hat{\beta_0})$.
+
+The lower panels of Figure 1 shows biases of $\hat{\beta}_0$ and $\hat{\beta}_1$ as $\sigma_u$ and $\rho$ vaies. The biases just fluctuates around 0. So $\rho$ and $\sigma_u$ have nothing to do with the unbiasedness.
+
+## IV. Conclusion
+
+In OLS estimation for simple linear regression, the autocorrelation structure of the error term would not affect the unbiasedness for estimated coefficients. However, it would reduce the estimation precision by increasing the variance of estimated coefficients, as well as creating longer prediction and confidence intervals. Therefore, it is essential to check the autocorrelation before conducting OLS.
+
+\newpage
+
+## Appendix
+
+```{r}
+#| echo: false
+# Parameter spaces 
+rho_values <- c(0, 0.3, 0.6, 0.9) 
+sigma_values <- c(0.5, 1, 2) 
+results <- expand.grid(rho = rho_values, sigma_u = sigma_values) 
+results$var_beta1 <- NA 
+results$var_beta0<-NA 
+for (i in 1:nrow(results)) {
+  boot <- bootstrap_ols(
+    x, beta0, beta1,
+    rho = results$rho[i],
+    sigma_u = results$sigma_u[i]
+  )
+  
+  # Variance
+  results$var_beta1[i]  <- var(boot$beta1)
+  results$var_beta0[i]  <- var(boot$beta0)
+  
+  # Bias
+  results$bias_beta1[i] <- mean(boot$beta1) - beta1
+  results$bias_beta0[i] <- mean(boot$beta0) - beta0
+}
+cols <- rainbow(length(rho_values))
+par(mfrow = c(2, 2),
+    mar = c(4, 4, 3, 1))
+# Variance for beta0
+plot(results$sigma_u, results$var_beta0,
+     type = "n",
+     xlab = expression(sigma[u]),
+     ylab = expression(Var(hat(beta)[0])),
+     main = expression(Var(hat(beta)[0])))
+
+for (i in seq_along(rho_values)) {
+  r <- rho_values[i]
+  sub <- subset(results, rho == r)
+  lines(sub$sigma_u, sub$var_beta0,
+        type = "b",
+        col = cols[i],
+        pch = 1)
+  }
+legend("topright",
+       legend = paste("rho =", rho_values),
+       col = cols,
+       lty = 1,
+       pch = 1,
+       bty = "n")
+# Variance for beta1
+plot(results$sigma_u, results$var_beta1,
+     type = "n",
+     xlab = expression(sigma[u]),
+     ylab = expression(Var(hat(beta)[1])),
+     main = expression(Var(hat(beta)[1])))
+
+for (i in seq_along(rho_values)) {
+  r <- rho_values[i]
+  sub <- subset(results, rho == r)
+  lines(sub$sigma_u, sub$var_beta1,
+        type = "b",
+        col = cols[i],
+        pch = 1)
+}
+# Bias for beta0
+plot(results$sigma_u, results$bias_beta0,
+     type = "n",
+     xlab = expression(sigma[u]),
+     ylab = expression(Bias(hat(beta)[0])),
+     main = expression(Bias(hat(beta)[0])))
+abline(h = 0, lty = 2)
+
+for (i in seq_along(rho_values)) {
+  r <- rho_values[i]
+  sub <- subset(results, rho == r)
+  lines(sub$sigma_u, sub$bias_beta0,
+        type = "b",
+        col = cols[i],
+        pch = 1)
+}
+# Bias for beta1
+plot(results$sigma_u, results$bias_beta1,
+     type = "n",
+     xlab = expression(sigma[u]),
+     ylab = expression(Bias(hat(beta)[1])),
+     main = expression(Bias(hat(beta)[1])))
+
+abline(h = 0, lty = 2)
+
+for (i in seq_along(rho_values)) {
+  r <- rho_values[i]
+  sub <- subset(results, rho == r)
+  lines(sub$sigma_u, sub$bias_beta1,
+        type = "b",
+        col = cols[i],
+        pch = 1)
+  }
+
+```
